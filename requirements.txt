@@ -1,4 +1,5 @@
 streamlit
-gTTS
 google-genai
+gTTS
 python-dotenv
+streamlit-mic_recorder

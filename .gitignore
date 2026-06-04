@@ -1,6 +1,4 @@
-# 忽略語音產生的暫存檔
-data/audio_cache/
-*.mp3
-
-# 忽略本地環境變數金鑰
 .env
+__pycache__/
+*.mp3
+data/audio_cache/data/storyboard_cache/ 
