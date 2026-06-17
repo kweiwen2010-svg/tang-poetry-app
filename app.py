@@ -118,27 +118,49 @@ else:
         st.write("---")
 
         # ==========================================
-        # 🤝 5. 與伴學老師對話（手機優化對話流）
+        # 🤝 5. 與伴學老師對話（焦點防禦手機優化版）
         # ==========================================
         st.write("### 🤝 與伴學老師對話")
-        st.write(f"讀完這首詩，你感受到了什麼？（也可以在此回答老師下方的提問喔！）")
         
-        # 用 Session State 來接語音文字與歷史對話紀錄
+        # 初始化 Session State 變數
         if "speech_text" not in st.session_state:
             st.session_state.speech_text = ""
         if "last_teacher_response" not in st.session_state:
             st.session_state.last_teacher_response = None
         if "last_user_thought" not in st.session_state:
             st.session_state.last_user_thought = None
+        if "show_chat_input" not in st.session_state:
+            st.session_state.show_chat_input = False
 
-        # 錄音元件（放在表單外）
-        audio_input = mic_recorder(
-            start_prompt="🎤 點我開始用語音說想法",
-            stop_prompt="🛑 說完了，停止錄音",
-            just_once=True,
-            key="mic_input"
-        )
+        # 如果上一次有對話紀錄，大方展示在畫面上（此時畫面上完全沒有 input 框，非常安全）
+        if st.session_state.last_user_thought:
+            st.write(f"🙋 **我的想法/回答：** {st.session_state.last_user_thought}")
+        if st.session_state.last_teacher_response:
+            st.info(f"🏮 **伴學老師的心靈回饋與素養挑戰：**\n\n{st.session_state.last_teacher_response}")
+            
+            # 如果老師有錄音，播放器放在這裡
+            if "teacher_audio_path" in st.session_state and os.path.exists(st.session_state.teacher_audio_path):
+                with open(st.session_state.teacher_audio_path, "rb") as teacher_audio_file:
+                    st.audio(teacher_audio_file.read(), format="audio/mp3")
 
+        st.write("讀完這首詩，你感受到了什麼？點擊下方按鈕開啟對話：")
+
+        # 核心防禦：用兩個乾淨的按鈕來控制對話模式，平時絕不把文字框掛在畫面上
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💬 打字輸入想法", use_container_width=True):
+                st.session_state.show_chat_input = True
+                st.rerun()
+        with col2:
+            # 錄音元件保持在外層
+            audio_input = mic_recorder(
+                start_prompt="🎤 語音輸入想法",
+                stop_prompt="🛑 說完了，停止錄音",
+                just_once=True,
+                key="mic_input"
+            )
+
+        # 處理語音輸入邏輯
         if audio_input and "bytes" in audio_input and api_key:
             with st.spinner("🎙️ 正在將您的語音轉換為精準文字..."):
                 try:
@@ -154,86 +176,81 @@ else:
                         ]
                     )
                     st.session_state.speech_text = stt_response.text.strip()
-                    st.rerun() # 語音轉完文字直接 rerun，洗掉焦點預防彈鍵盤
+                    st.session_state.show_chat_input = True # 辨識完後打開輸入框讓使用者確認
+                    st.rerun()
                 except Exception as stt_err:
                     st.error(f"語音識別發生小錯誤：{stt_err}")
 
-        # 如果上一次有對話紀錄，呈現在表單上方，避免點選單時失焦
-        if st.session_state.last_user_thought:
-            st.write(f"🙋 **我的想法/回答：** {st.session_state.last_user_thought}")
-        if st.session_state.last_teacher_response:
-            st.info(f"🏮 **伴學老師的心靈回饋與素養挑戰：**\n\n{st.session_state.last_teacher_response}")
-            st.caption("💡 *小提示：如果你想繼續回答老師，可以再次使用上方語音按鈕，或在對話框修改後發送。*")
-
-        # 對話表單：設定 clear_on_submit=True 讓發送後輸入框自動清空
-        with st.form(key=f"teacher_form_{target_poem_id}", clear_on_submit=True):
-            user_thought = st.text_area(
-                "分享你的想法：",
-                value=st.session_state.speech_text,
-                placeholder="請在此輸入文字，或使用上方的語音按鈕錄音輸入..."
-            )
-            submit_button = st.form_submit_button("發送想法給伴學老師")
-            
-        if submit_button:
-            if not user_thought.strip():
-                st.warning("請先輸入你的感受、使用語音錄音或回答問題再送出喔！")
-            else:
-                st.session_state.last_user_thought = user_thought
+        # 只有當使用者點了打字，或是語音輸入完畢後，才動態渲染這個表單區塊！
+        if st.session_state.show_chat_input:
+            st.write("---")
+            with st.form(key=f"teacher_form_{target_poem_id}", clear_on_submit=True):
+                user_thought = st.text_area(
+                    "在此微調或輸入您的想法：",
+                    value=st.session_state.speech_text,
+                    placeholder="請輸入你的感受或回答老師的問題..."
+                )
                 
-                if not api_key:
-                    st.error("❌ 本機環境未偵測到 GEMINI_API_KEY！")
+                c1, c2 = st.form_submit_button("發送給老師"), st.form_submit_button("取消關閉")
+                
+            if c2: # 使用者點選取消
+                st.session_state.show_chat_input = False
+                st.session_state.speech_text = ""
+                st.rerun()
+                
+            if c1: # 使用者送出
+                if not user_thought.strip():
+                    st.warning("請先輸入文字再送出喔！")
                 else:
-                    with st.spinner("伴學老師正在細細品讀您的想法..."):
-                        try:
-                            client = genai.Client(api_key=api_key)
-                            teacher_prompt = (
-                                f"你是一位精通唐詩與文學教育的伴學老師。\n"
-                                f"目前研讀的古詩是：《{poem['title']}》，作者：{poem['author']}。\n"
-                                f"古詩原文內容：\n{poem['content']}\n\n"
-                                f"學生的想法或回答是：『{user_thought}』。\n\n"
-                                f"請遵循以下鋼鐵限制給予回饋：\n"
-                                f"1. 必須以溫慢、充滿文學素養的溫慢口吻（例如稱呼學生為孩子或同學）回應並引導學生。\n"
-                                f"2. 請精準抓取這首詩本身的『核心內涵、關鍵字詞或經典意象』，完美編織回填到你的回饋中。\n"
-                                f"3. 關鍵任務：請在回應的最後，根據這首詩的靈魂，動態出一題『與現代生活情境結合的開放式素養思辨題（沒有標準答案）』，強迫學生思考並將古人智慧與現代生活連結。\n"
-                                f"4. 字數控制：『全文字數（含出題）嚴格限制在 200 到 250 字之間』，精簡流暢，結構清晰，絕對不要長篇大論。"
-                            )
-                            
-                            response = client.models.generate_content(
-                                model='gemini-2.5-flash', 
-                                contents=teacher_prompt
-                            )
-                            teacher_text = response.text.strip()
-                            
-                            st.session_state.last_teacher_response = teacher_text
-                            
-                            # 伴學老師語音生成
+                    st.session_state.last_user_thought = user_thought
+                    
+                    if not api_key:
+                        st.error("❌ 本機環境未偵測到 GEMINI_API_KEY！")
+                    else:
+                        with st.spinner("伴學老師正在細細品讀您的想法..."):
                             try:
-                                old_files = glob.glob(os.path.join(AUDIO_DIR, f"teacher_reply_{target_poem_id}_*.mp3"))
-                                for fpath in old_files:
-                                    try:
-                                        os.remove(fpath)
-                                    except Exception:
-                                        pass
+                                client = genai.Client(api_key=api_key)
+                                teacher_prompt = (
+                                    f"你是一位精通唐詩與文學教育的伴學老師。\n"
+                                    f"目前研讀的古詩是：《{poem['title']}》，作者：{poem['author']}。\n"
+                                    f"古詩原文內容：\n{poem['content']}\n\n"
+                                    f"學生的想法或回答是：『{user_thought}』。\n\n"
+                                    f"請遵循以下鋼鐵限制給予回饋：\n"
+                                    f"1. 必須以溫慢、充滿文學素養的溫慢口吻（例如稱呼學生為孩子或同學）回應並引導學生。\n"
+                                    f"2. 請精準抓取這首詩本身的『核心內涵、關鍵字詞或經典意象』，完美編織回填到你的回饋中。\n"
+                                    f"3. 關鍵任務：請在回應的最後，根據這首詩的靈魂，動態出一題『與現代生活情境結合的開放式素養思辨題（沒有標準答案）』，強迫學生思考並將古人智慧與現代生活連結。\n"
+                                    f"4. 字數控制：『全文字數（含出題）嚴格限制在 200 到 250 字之間』，精簡流暢，結構清晰，絕對不要長篇大論。"
+                                )
                                 
-                                timestamp = int(time.time())
-                                teacher_audio_path = os.path.join(AUDIO_DIR, f"teacher_reply_{target_poem_id}_{timestamp}.mp3")
+                                response = client.models.generate_content(
+                                    model='gemini-2.5-flash', 
+                                    contents=teacher_prompt
+                                )
+                                teacher_text = response.text.strip()
+                                st.session_state.last_teacher_response = teacher_text
                                 
-                                teacher_tts = gTTS(text=teacher_text, lang='zh-TW', slow=False)
-                                teacher_tts.save(teacher_audio_path)
+                                # 伴學老師語音生成
+                                try:
+                                    old_files = glob.glob(os.path.join(AUDIO_DIR, f"teacher_reply_{target_poem_id}_*.mp3"))
+                                    for fpath in old_files:
+                                        try:
+                                            os.remove(fpath)
+                                        except Exception:
+                                            pass
+                                    
+                                    timestamp = int(time.time())
+                                    teacher_audio_path = os.path.join(AUDIO_DIR, f"teacher_reply_{target_poem_id}_{timestamp}.mp3")
+                                    
+                                    teacher_tts = gTTS(text=teacher_text, lang='zh-TW', slow=False)
+                                    teacher_tts.save(teacher_audio_path)
+                                    st.session_state.teacher_audio_path = teacher_audio_path
+                                except Exception as audio_err:
+                                    st.error(f"老師語音回饋生成失敗: {audio_err}")
                                 
-                                st.session_state.teacher_audio_path = teacher_audio_path
-                            except Exception as audio_err:
-                                st.error(f"老師語音回饋生成失敗: {audio_err}")
-                                
-                            # 送出成功後重設語音緩存並重製頁面焦點，徹底根治手機下拉選單跳出鍵盤的問題
-                            st.session_state.speech_text = ""
-                            st.rerun()
-                                
-                        except Exception as e:
-                            st.error(f"❌ 伴學老師連線失敗：{e}")
-
-        # 呈現老師的語音播放器（放在表單外部，確保刷新後正常播放）
-        if "teacher_audio_path" in st.session_state and os.path.exists(st.session_state.teacher_audio_path):
-            st.write("🎵 **聆聽老師的溫慢語音：**")
-            with open(st.session_state.teacher_audio_path, "rb") as teacher_audio_file:
-                st.audio(teacher_audio_file.read(), format="audio/mp3")
+                                # 重要：送出完成後關閉輸入框、清空暫存文字，並重整頁面
+                                st.session_state.show_chat_input = False
+                                st.session_state.speech_text = ""
+                                st.rerun()
+                                    
+                            except Exception as e:
+                                st.error(f"❌ 伴學老師連線失敗：{e}")
