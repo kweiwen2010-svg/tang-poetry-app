@@ -56,13 +56,15 @@ else:
         st.write("---")
         
         # ==========================================
-        # 3. 詩詞呈現與語音朗讀區塊
+        # 3. 詩詞呈現與語音朗讀區塊（標準單欄）
         # ==========================================
         st.subheader(f"《{poem['title']}》")
         st.text(f"作者：【唐】{poem['author']}")
         
+        # 詩詞正文
         st.info(poem['content'])
         
+        # 語音朗讀
         st.write("🔊 **詩詞語音美學朗讀：**")
         poem_audio_path = os.path.join(AUDIO_DIR, f"poem_{target_poem_id}.mp3")
         
@@ -81,40 +83,56 @@ else:
         st.write("---")
         
         # ==========================================
-        # 4. 經典導讀區塊
+        # 4. 經典導讀區塊（引入快取優化，拒絕卡頓）
         # ==========================================
         st.write("### 📖 詩詞背景與心靈導讀")
         
         api_key = os.environ.get("GEMINI_API_KEY")
-        dynamic_story_text = ""
         
-        if api_key:
-            try:
-                client = genai.Client(api_key=api_key)
-                story_prompt = (
-                    f"你是一位擅長將枯燥古文轉化為動人故事的資深文學導師。\n"
-                    f"請根據以下這首詩的資料，為研讀的學生撰寫一份極具深度、有畫面感且充滿溫度的『心靈導讀』。\n\n"
-                    f"詩名：《{poem['title']}》\n"
-                    f"作者：{poem['author']}\n"
-                    f"原文內容：\n{poem['content']}\n"
-                    f"參考背景資料：{poem['story'] or '無額外歷史註記'}\n\n"
-                    f"請遵循以下限制：\n"
-                    f"1. 嚴禁使用罐頭、千篇一律的套話。\n"
-                    f"2. 必須用講故事的口吻，深入白話地描繪出詩人寫下這首詩時的『內心糾結、時空背景與靈魂共鳴點』。\n"
-                    f"3. 字數嚴格控制在 150 到 220 字之間，分為一個精簡的段落。"
-                )
-                with st.spinner("正在為您點亮這首詩的靈魂背景..."):
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash', 
-                        contents=story_prompt
-                    )
-                    dynamic_story_text = response.text.strip()
-            except Exception as e:
-                dynamic_story_text = poem['story'] or "暫無背景導讀。"
-        else:
-            dynamic_story_text = poem['story'] or "暫無背景導讀。"
+        # 檢查是否需要重新為這首詩生成導讀（切換詩詞時才更新）
+        if "current_poem_id" not in st.session_state or st.session_state.current_poem_id != target_poem_id:
+            st.session_state.current_poem_id = target_poem_id
+            st.session_state.cached_story_text = ""  # 清空舊詩導讀
             
-        st.success(f"【經典導讀】{dynamic_story_text}")
+            # 清除上一首詩的對話狀態，避免錯亂
+            st.session_state.speech_text = ""
+            st.session_state.last_teacher_response = None
+            st.session_state.last_user_thought = None
+            st.session_state.show_chat_input = False
+            if "teacher_audio_path" in st.session_state:
+                del st.session_state.teacher_audio_path
+        
+        # 如果快取裡沒東西，才呼叫 Gemini API
+        if not st.session_state.cached_story_text:
+            if api_key:
+                try:
+                    client = genai.Client(api_key=api_key)
+                    story_prompt = (
+                        f"你是一位擅長將枯燥古文轉化為動人故事的資深文學導師。\n"
+                        f"請根據以下這首詩的資料，為研讀的學生撰寫一份極具深度、有畫面感且充滿溫度的『心靈導讀』。\n\n"
+                        f"詩名：《{poem['title']}》\n"
+                        f"作者：{poem['author']}\n"
+                        f"原文內容：\n{poem['content']}\n"
+                        f"參考背景資料：{poem['story'] or '無額外歷史註記'}\n\n"
+                        f"請遵循以下限制：\n"
+                        f"1. 嚴禁使用罐頭、千篇一律的套話。\n"
+                        f"2. 必須用講故事的口吻，深入白話地描繪出詩人寫下這首詩時的『內心糾結、時空背景與靈魂共鳴點』。\n"
+                        f"3. 字數嚴格控制在 150 到 220 字之間，分為一個精簡的段落。"
+                    )
+                    with st.spinner("正在為您點亮這首詩的靈魂背景..."):
+                        response = client.models.generate_content(
+                            model='gemini-2.5-flash', 
+                            contents=story_prompt
+                        )
+                        st.session_state.cached_story_text = response.text.strip()
+                except Exception as e:
+                    st.session_state.cached_story_text = poem['story'] or "暫無背景導讀。"
+            else:
+                st.session_state.cached_story_text = poem['story'] or "暫無背景導讀。"
+            
+        # 經典導讀提示框：直接秒讀快取資料
+        st.success(f"【經典導讀】{st.session_state.cached_story_text}")
+        
         st.write("---")
 
         # ==========================================
@@ -132,7 +150,7 @@ else:
         if "show_chat_input" not in st.session_state:
             st.session_state.show_chat_input = False
 
-        # 如果上一次有對話紀錄，大方展示在畫面上（此時畫面上完全沒有 input 框，非常安全）
+        # 如果上一次有對話紀錄，大方展示在畫面上
         if st.session_state.last_user_thought:
             st.write(f"🙋 **我的想法/回答：** {st.session_state.last_user_thought}")
         if st.session_state.last_teacher_response:
@@ -145,12 +163,12 @@ else:
 
         st.write("讀完這首詩，你感受到了什麼？點擊下方按鈕開啟對話：")
 
-        # 核心防禦：用兩個乾淨的按鈕來控制對話模式，平時絕不把文字框掛在畫面上
+        # 用兩個乾淨的按鈕來控制對話模式
         col1, col2 = st.columns(2)
         with col1:
             if st.button("💬 打字輸入想法", use_container_width=True):
                 st.session_state.show_chat_input = True
-                st.rerun()
+                st.rerun()  # 這次 rerun 將會瞬間完成，因為導讀有快取了！
         with col2:
             # 錄音元件保持在外層
             audio_input = mic_recorder(
